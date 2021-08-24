@@ -1,0 +1,109 @@
+---
+title: ""
+author: ""
+date: "2/17/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Reading in Libraries
+
+```{r}
+library(ISLR)
+library(MASS)
+library(caret)
+library(leaps)
+library(glmnet)
+library(pls)
+```
+
+## 6.9 Reading in "Weekly" Data
+
+```{r}
+df <- as.data.frame(College)
+```
+
+## 6.9 a) Splitting the Data
+
+```{r}
+set.seed(123)
+train <- sample(777, 699)
+```
+
+## 6.9 b) Least Squares Regression
+
+```{r}
+regout <- lm(Apps~., data = df[train,])
+lm.prediction <- predict(regout, df[-train,])
+
+RMSE(lm.prediction, df[-train, "Apps"])
+```
+
+## 6.9 c) Ridge Regression
+
+```{r}
+y <- df$Apps
+x <- as.matrix(df[, 3:18])
+train.y <- y[train]
+train.x <- x[train,]
+grid <- 10^seq(10, -2, length = 100)
+
+ridge.mod <- glmnet(train.x, train.y, alpha = 0, lambda = grid)
+ridge.pred <- predict(ridge.mod, s = 50, newx = x[-train,])
+RMSE(ridge.pred, y[-train])
+```
+
+## 6.9 d) Lasso
+
+```{r}
+cv.out <- cv.glmnet(train.x, train.y, alpha = 1)
+plot(cv.out)
+best.lam <- cv.out$lambda.min
+
+lasso.mod <- glmnet(train.x, train.y, alpha = 1, lambda = grid)
+plot(lasso.mod)
+
+lasso.pred <- predict(lasso.mod, s = best.lam, newx = x[-train,])
+RMSE(lasso.pred, y[-train])
+
+out <- glmnet(x, y, alpha = 1, lambda = grid)
+lasso.coef <- predict(out, type = "coefficients", s = best.lam)
+lasso.coef
+```
+
+According to the Lasso model, all of our coefficients are non-zero, with the exception of "Books".
+
+## 6.9 e) PCR
+
+```{r}
+pcr.fit <- pcr(Apps~., data = df, subset = train, scale = TRUE,
+            validation = "CV")
+summary(pcr.fit)
+validationplot(pcr.fit, val.type="RMSEP", xlab = "Size of M")
+
+pcr.pred <- predict(pcr.fit, df[-train,], ncomp = 17)
+RMSE(pcr.pred, y[-train])
+```
+
+When using cross-validation, our PCR model indicates that our M should equal 17, that being the maximum number of variables.
+
+## 6.9 f) PLS
+
+```{r}
+pls.fit <- plsr(Apps~., data = df, subset = train, scale = TRUE,
+                validation = "CV")
+summary(pls.fit)
+validationplot(pls.fit, val.type="RMSEP", xlab = "Size of M")
+
+pls.pred <- predict(pls.fit, df[-train,], ncomp = 10)
+RMSE(pls.pred, y[-train])
+```
+
+The PLS approach likewise indicates that our M should equal 17, and provides a similar, but slightly lower, out of sample test RMSE.
+
+## 6.9 g) Conclusions
+
+PCR and PLS do not offer any real improvement over the basic LS model, as neither suggest dimensionality reduction. It is therefore not suprising that all three are fairly similar in terms of the testing RMSE. In contrast, both Lasso and Ridge Regression provide lower testing RMSE, and the Lasso coefficients indicate that including the variable "Books" might lower our out of sample performance. However, all five RMSE's range between 670 and 690 for our given seed, so a model detirmined by LS might be appropriate for our given data set, and is certaintly the easiest to produce.
