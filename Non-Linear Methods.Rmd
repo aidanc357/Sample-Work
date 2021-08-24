@@ -1,0 +1,454 @@
+---
+title: ""
+author: ""
+date: "3/03/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Reading in Libraries
+
+```{r, echo = FALSE, warning = FALSE}
+library(ISLR)
+library(MASS)
+library(caret)
+library(ggplot2)
+library(splines)
+library(tree)
+library(randomForest)
+library(gbm)
+library(e1071)
+```
+
+## 7.7 Reading in "Wage" Dataset
+
+```{r, warning = FALSE}
+wages.df <- as.data.frame(Wage)
+```
+
+## 7.7 a) Exploratory Data Analysis
+
+I decided to examine log wages (as opposed to wages due to magnitude) and see how its distribution changes with respect to the various categorical predictors, and the two numerical predictors (age and year).
+
+```{r, warning = FALSE}
+ggplot(wages.df,
+       aes(x = logwage,
+           fill = maritl)) +
+  geom_bar(stat = "bin")
+
+ggplot(wages.df,
+       aes(x = logwage,
+           fill = race)) +
+  geom_bar(stat = "bin")
+
+ggplot(wages.df,
+       aes(x = logwage,
+           fill = education)) +
+  geom_bar(stat = "bin")
+
+ggplot(wages.df,
+       aes(x = logwage,
+           fill = region)) +
+  geom_bar(stat = "bin")
+
+ggplot(wages.df,
+       aes(x = logwage,
+           fill = jobclass)) +
+  geom_bar(stat = "bin")
+
+ggplot(wages.df,
+       aes(x = logwage,
+           fill = health)) +
+  geom_bar(stat = "bin")
+
+ggplot(wages.df,
+       aes(x = logwage,
+           fill = health_ins)) +
+  geom_bar(stat = "bin")
+
+ggplot(wages.df,
+       aes(x = year,
+           y = logwage)) +
+  geom_point()
+
+ggplot(wages.df,
+       aes(x = age,
+           y = logwage)) +
+  geom_point()
+```
+
+All categorical variables appear to relevant predictors with regards to log wages, with the exception of region which contains no variation. However, some variables, such as marital status and education, appear to more strongly correlated with log wages than others from visual inspection of the distributions. Both numerical predictors appear to have non-linear relationships with log wages and could be modeled as such.
+
+## 7.7 b) Model Experimentation
+
+We can begin with a simple linear model that includes all factors, except region, to provide a baseline. Then we can experiment with a model that includes non-linear terms to capture some of the structure we see in the graphs above.
+
+```{r, warning = FALSE}
+set.seed(89139496)
+train <- sample(3000, 2100)
+
+regout <- lm(logwage ~ year + age + maritl + race + education +
+               jobclass + health + health_ins,
+             data = wages.df[train,])
+
+lm.predict <- predict(regout, wages.df[-train,])
+RMSE(lm.predict, wages.df[-train,]$logwage)
+
+plot(regout$residuals)
+
+regout <- lm(logwage ~ poly(year, degree = 3) + poly(age, degree = 3) +
+               maritl + race + education +
+               jobclass + health + health_ins,
+             data = wages.df[train,])
+
+lm.predict <- predict(regout, wages.df[-train,])
+RMSE(lm.predict, wages.df[-train,]$logwage)
+
+plot(regout$residuals)
+```
+
+Although the difference is slight, including the polynomials for year and age did lower our test RMSE. The second residual plot is also tighter than the first. So our more complex model is likely better at capturing the actual structure of the data.
+
+## 7.9 Reading in "Boston" Dataset
+
+```{r, warning = FALSE}
+boston.df <- as.data.frame(Boston)
+```
+
+## 7.9 a) Cubic Polynomial Model
+
+```{r, warning = FALSE}
+regout <- lm(nox ~ poly(dis, degree = 3), data = boston.df)
+summary(regout)
+
+lm.predict <- predict(regout, boston.df)
+  
+plot(boston.df$dis, boston.df$nox, xlab = "Dis Value", ylab = "Nox Value",
+     main = "Polynomial Fit of Degree 3")
+ix <- sort(boston.df$dis, index.return = T)$ix
+lines(boston.df$dis[ix], lm.predict[ix], col = 2, lwd = 2 )
+```
+
+## 7.9 b) Changing Polynomial Degree
+
+```{r, warning = FALSE}
+scores <- c(1:10)*0
+
+for (i in 1:10)
+{
+  regout <- lm(nox ~ poly(dis, degree = i), data = boston.df)
+  
+  lm.predict <- predict(regout, boston.df)
+  title <- paste("Polynomial Fit of Degree ", i)
+  
+  plot(boston.df$dis, boston.df$nox, xlab = "Dis Value", ylab = "Nox Value",
+       main = title)
+  ix <- sort(boston.df$dis, index.return = T)$ix
+  lines(boston.df$dis[ix], lm.predict[ix], col = 2, lwd = 2 )  
+  
+  scores[i] = sum(resid(regout)^2)
+}
+
+plot(scores, xlab = "Degree of Polynomial", ylab = "RSS")
+```
+
+## 7.9 c) Cross-Validation
+
+```{r, warning = FALSE}
+set.seed(39229191)
+train = sample(506, 354)
+
+for (i in 1:10)
+{
+  regout <- lm(nox ~ poly(dis, degree = i), data = boston.df[train,])
+  lm.predict <- predict(regout, boston.df[-train,])
+  
+  scores[i] = RMSE(lm.predict, boston.df$nox[-train])
+}
+
+plot(scores, xlab = "Degree of Polynomial", ylab = "RMSE")
+
+print(scores)
+```
+
+Interestingly, the test RMSE still appears to slightly favor the most complex model with a polynomial of degree 10. However, there is only marginal improvement from the second-degree polynomial to the tenth in terms of accuracy, so the former might be preferable in terms of simplicity and interpretability.
+
+## 7.9 d) Regression Spline
+
+I chose the knots below based purely on visual inspection of the data. They roughly correspond to the quartiles of the data, with slight differences.
+
+```{r, warning = FALSE}
+regout <- lm(nox ~ bs(dis, df = 4, knots = c(4, 6, 10)), data = boston.df)
+lm.predict <- predict(regout, boston.df)
+
+title <- paste("Basis Spline with 4 Degrees of Freedom")
+  
+plot(boston.df$dis, boston.df$nox, xlab = "Dis Value", ylab = "Nox Value",
+     main = title)
+ix <- sort(boston.df$dis, index.return = T)$ix
+lines(boston.df$dis[ix], lm.predict[ix], col = 2, lwd = 2)
+```
+
+The spline has a better fit than all of our other polynomial models and adheres more closely to the actual data themselves. This could however come at the risk of overfitting the model.
+
+## 7.9 e) Comparing RSS
+
+```{r, warning = FALSE}
+for (i in 1:10)
+{
+  regout <- lm(nox ~ bs(dis, df = i), data = boston.df)
+  
+  scores[i] = sum(resid(regout)^2)
+}
+
+plot(scores, xlab = "Degrees of Freedom", ylab = "RSS",
+     xlim = c(3,10))
+```
+
+While there is an expected gradual decline in RSS as complexity increases, all models are quite similar to one another in terms of the absolute RSS value. There is a large relative decline in RSS between the 4th and 5th degrees of freedom, and again from the 9th to the 10th.
+
+## 7.9 f) Cross-Validation
+
+```{r, warning = FALSE}
+boston.df.test <- boston.df[train,]
+boston.df.train <- boston.df[-train,]
+
+for (i in 1:10)
+{
+  regout <- lm(nox ~ bs(dis, df = i), data = boston.df.train)
+  lm.predict <- predict(regout, boston.df.test)
+  
+  scores[i] = RMSE(lm.predict, boston.df$nox[-train])
+}
+
+plot(scores, xlab = "Degree of Spline", ylab = "RMSE",
+     xlim = c(3,10))
+```
+
+In comparing test RMSE, we see that the spline with 3 degrees of freedom is favored above the rest. Greater complexity does not improve test accuracy in this case.
+
+## 8.8 Reading in "Carseats" Dataset
+
+```{r, warning = FALSE}
+carseats.df <- as.data.frame(Carseats)
+```
+
+## 8.8 a) Creating Training and Testing Sets
+
+```{r, warning = FALSE}
+set.seed(94228892)
+train = sample(400, 280)
+```
+
+## 8.8 b) Regression Tree
+
+```{r, warning = FALSE}
+tree <- tree(Sales ~., data = carseats.df[train,])
+summary(tree)
+
+plot(tree)
+text(tree, pretty = 0, cex = 0.5)
+
+tree.predict <- predict(tree, carseats.df[-train,])
+RMSE(tree.predict, carseats.df[-train,]$Sales)
+```
+
+In the tree above we can observe the relative importance of certain predictors. Some, like shelf location and price, are used to sort of all of the data, both at the front of the tree and at the end, while others, such as education, appear just once and at terminal nodes.
+
+## 8.8 c) Cross-Validation
+
+```{r, warning = FALSE}
+cv.carseats <- cv.tree(tree)
+plot(cv.carseats$size, cv.carseats$dev, type = "b")
+
+prune <- prune.tree(tree, best = 5)
+
+plot(prune)
+text(prune, pretty = 0, cex = 1)
+
+tree.predict <- predict(prune, carseats.df[-train,])
+RMSE(tree.predict, carseats.df[-train,]$Sales)
+```
+
+Cross-validation leads to selection of trees of greater, if not maximum, complexity. As such, pruning is not necessary if our goal is simply greater accuracy with a testing set. It is therefore not suprising that the test RMSE went up with our second tree. However, the second tree is much easier to read and interpret.
+
+## 8.8 d) Bagging
+
+```{r, warning = FALSE}
+bag <- randomForest(Sales ~., data = carseats.df[train,], mtry = 10,
+                    importance = TRUE)
+print(bag)
+
+bag.predict <- predict(bag, carseats.df[-train,])
+RMSE(bag.predict, carseats.df[-train,]$Sales)
+
+importance(bag)
+```
+
+The importance table reinforce our visual and intuitive observations of the initial tree. In terms of IncMSE, shelf location and price are the most important. Population, education, urban, and US are the least relevant to prediction.
+
+## 8.8 e) Fitting a Random Forest
+
+```{r, warning = FALSE}
+rf <- randomForest(Sales ~., data = carseats.df[train,],
+                    importance = TRUE)
+print(rf)
+
+rf.predict <- predict(rf, carseats.df[-train,])
+RMSE(rf.predict, carseats.df[-train,]$Sales)
+
+importance(rf)
+
+rf <- randomForest(Sales ~., data = carseats.df[train,], mtry = 7,
+                    importance = TRUE)
+print(rf)
+
+rf.predict <- predict(rf, carseats.df[-train,])
+RMSE(rf.predict, carseats.df[-train,]$Sales)
+
+importance(rf)
+```
+
+As we raise the number of predictors to be considered for splitting at each node from 4 to 7, we can see the test RMSE decrease slightly. However, the test RMSE goes back up if we consider our original model with bagging, where we consider the maximum number of predictors, that being 10.
+
+## 8.11 Reading in "Caravan" Dataset
+
+```{r, warning = FALSE}
+set.seed(12213395)
+caravan.df <- as.data.frame(Caravan)
+
+caravan.df$PVRAAUT <- NULL
+caravan.df$AVRAAUT <- NULL
+```
+
+## 8.11 a) Creating Training and Testing Sets
+
+```{r, warning = FALSE}
+train <- c(1:1000)
+```
+
+## 8.11 b) Fitting a Boosting Model
+
+```{r, warning = FALSE}
+boost <- gbm(Purchase ~., data = caravan.df[train,],
+             distribution = "multinomial", n.trees = 1000,
+             interaction.depth = 4, shrinkage = 0.01)
+
+summary(boost)
+```
+
+Of our many predictors PPERSAUT and MGODGE appear to be the most important, and are the only two predictors with a "rel.inf" score above 5.
+
+## 8.11 c) Evaluating Model Performance
+
+```{r, warning = FALSE}
+boost.predict <- predict(boost, caravan.df[-train,], n.trees = 1000,
+                         type = "response")
+
+boost.results <- c(1:4822)*0 + 1
+boost.results[boost.predict[,2,1] > 0.2] = 2
+boost.results <- as.factor(boost.results)
+levels(boost.results)[1] <- "No"
+levels(boost.results)[2] <- "Yes"
+
+real.results <- caravan.df[-train,]$Purchase
+confusionMatrix(boost.results, real.results)
+
+logit <- glm(Purchase ~., data = caravan.df[train,],
+             family = "binomial")
+logit.predict <- predict(logit, caravan.df[-train,])
+logit.predict <- (exp(1))^logit.predict/((exp(1))^logit.predict+1)
+
+logit.results <- c(1:4822)*0 + 1
+logit.results[logit.predict > 0.2] = 2
+logit.results <- as.factor(logit.results)
+levels(logit.results)[1] <- "No"
+levels(logit.results)[2] <- "Yes"
+
+confusionMatrix(logit.results, real.results)
+```
+
+The boosting model is slightly more accurate overall when compared against logistic regression, by a few percentage points. However, the boosting model suffers from low specificity in comparison. It would be useful here to have a loss function to compare the relative importance of sensitivity and specificity. We could also compare the two models in such respects with ROC curves. 
+
+## 9.5 a) Generating Data
+
+```{r, warning = FALSE}
+set.seed(74278806)
+train <- sample(500, 350)
+
+x1 <- runif(500) - 0.5
+x2 <- runif(500) - 0.5
+y <- 1*(x1^2 - x2^2 > 0)
+```
+
+## 9.5 b) Plotting Data
+
+```{r, warning = FALSE}
+plot(x1, x2, col = y + 2)
+```
+
+## 9.5 c) Logistic Regression
+
+```{r, warning = FALSE}
+synthetic.df <- data.frame(y, x1, x2)
+
+logit <- glm(y ~ x1 + x2, data = synthetic.df[train,],
+             family = "binomial")
+```
+
+## 9.5 d) Plotting Logistic Predictions
+
+```{r, warning = FALSE}
+logit.predict <- predict(logit, synthetic.df[-train,])
+logit.predict <- (exp(1))^logit.predict/((exp(1))^logit.predict+1)
+logit.predict[logit.predict < 0.5] = 0
+logit.predict[logit.predict > 0.5] = 1
+
+plot(x1[-train], x2[-train], col = logit.predict + 2,
+     xlab = "x1", ylab = "x2")
+```
+
+## 9.5 e) Logistic Regression with Non-linear Terms
+
+```{r, warning = FALSE}
+logit <- glm(y ~ x1 + x2 + x1*x2 + x1/x2,
+             data = synthetic.df[train,], family = "binomial")
+```
+
+## 9.5 f) Second Logsitic Plot
+
+```{r, warning = FALSE}
+logit.predict <- predict(logit, synthetic.df[-train,])
+logit.predict <- (exp(1))^logit.predict/((exp(1))^logit.predict+1)
+logit.predict[logit.predict < 0.5] = 0
+logit.predict[logit.predict > 0.5] = 1
+
+plot(x1[-train], x2[-train], col = logit.predict + 2,
+     xlab = "x1", ylab = "x2")
+```
+
+## 9.5 g) SVM with Linear Kernel
+
+```{r, warning = FALSE}
+synthetic.df <- data.frame(as.factor(y), x1, x2)
+svm.fit <- svm(as.factor.y. ~ x1 + x2, data = synthetic.df[train,],
+           kernel = "linear", gamma = 1, cost = 1)
+
+plot(svm.fit, synthetic.df[-train,])
+```
+
+## 9.5 h) Using SVM with Non-linear Kernel
+
+```{r, warning = FALSE}
+svm.fit <- svm(as.factor.y. ~ x1 + x2, data = synthetic.df[train,],
+           kernel = "radial", gamma = 1, cost = 1)
+
+plot(svm.fit, synthetic.df[-train,])
+```
+
+## 9.6 i) Observations
+
+Given the original structure of the data, it is not suprising that our traditional classification approach in the form of logistic regression failed. Both of our logistic models established just one decision boundary, whereas in the actual data we have two. Furthermore, the actual decision boundaries are neither linear nor quadratic, but are instead hyperbolic, which necessitated non-linear SVM with the use of the "radial" kernel function. It was for this reason that linear SVM likewise failed to establish accurate decision regions. As can be seen above, our non-linear SVM approach is not a perfect classifier, but it is the only one that came close to approximating the true decision regions.
